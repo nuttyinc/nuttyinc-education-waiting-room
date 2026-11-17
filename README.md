@@ -1,18 +1,19 @@
 # NuttyInc Education
 
-A calm classroom waiting room with teacher controls, account signup through ChatGPT, a beta notice, and encrypted display names.
+A calm classroom waiting room with teacher controls, guest student entry and teacher sign-in through ChatGPT, a beta notice, and encrypted display names.
 
 - [Open the hosted app](https://nuttyinc-education-room.slaney-scott.chatgpt.site)
 - [Source repository](https://github.com/nuttyinc/nuttyinc-education-waiting-room)
 - GitHub Pages entry page: `docs/index.html`
 
-The hosted app currently has owner-only access. Repository access and GitHub Pages access do not grant access to the hosted app.
+Students can join the public hosted app with a display name and classroom code. Teachers sign in to create and manage their own rooms.
 
 ## Features
 
-- Create an account profile after ChatGPT sign-in.
+- Students join with a display name and room code, with no account or login.
+- Teachers create an account profile after ChatGPT sign-in.
 - Teachers create rooms and share unique classroom codes.
-- Students join a waiting room and see their own admission status.
+- Students join a waiting room and see their own admission status. A secure HttpOnly browser cookie identifies their guest session for up to 12 hours; refresh keeps their room code in the URL. Clearing cookies or switching browsers starts a new session.
 - Teachers admit individual learners or everyone waiting, remove entries, and close or reopen a room.
 - Display names are encrypted in Cloudflare D1 using AES-256-GCM and a server-only key. Teachers can reveal names only in rooms they own. Students see only their own entries.
 - Persistent beta warning and responsive student and teacher layouts.
@@ -50,6 +51,7 @@ Local loopback development provides a simulated sign-in identity. Hosted sign-in
 ## Checks
 
 ```sh
+node --test tests/guest-room.test.mjs
 npx tsc --noEmit
 npm run build
 ```
