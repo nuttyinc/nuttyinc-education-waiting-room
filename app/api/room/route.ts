@@ -1,7 +1,7 @@
 import {env} from 'cloudflare:workers';
 import {getChatGPTUser} from '../../chatgpt-auth';
 import {getDb} from '../../../db';
-import {profiles,rooms,entries} from '../../../db/schema';
+import {profiles,rooms,entries,tickets} from '../../../db/schema';
 import {eq,and,or} from 'drizzle-orm';
 import {guestSession,newGuestSession,displayName} from './guest';
 export const dynamic='force-dynamic';
@@ -11,6 +11,16 @@ async function crypt(value:string,decode=false){
  const key=await crypto.subtle.importKey('raw',raw,'AES-GCM',false,['encrypt','decrypt']);
  if(decode){const bytes=Uint8Array.from(atob(value),c=>c.charCodeAt(0));return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM',iv:bytes.slice(0,12)},key,bytes.slice(12)));}
  const iv=crypto.getRandomValues(new Uint8Array(12));const data=new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(value)));return btoa(String.fromCharCode(...iv,...data));
+}
+async function ticketNumber(entry:{id:string,joined:number}){
+ const db=getDb(),key=entry.id+':'+entry.joined;
+ let ticket=await db.select().from(tickets).where(eq(tickets.entry,key)).get();
+ if(!ticket){
+   await db.insert(tickets).values({entry:key}).onConflictDoNothing();
+   ticket=await db.select().from(tickets).where(eq(tickets.entry,key)).get();
+ }
+ if(!ticket)throw Error('Ticket allocation failed');
+ return ticket.number;
 }
 export async function GET(req:Request){try{
  const u=await getChatGPTUser(), guest=guestSession(req), db=getDb();
@@ -24,7 +34,18 @@ export async function GET(req:Request){try{
  if(room&&(teacher||identities.length)){
    const filter=teacher?eq(entries.room,room.id):and(eq(entries.room,room.id),or(...identities.map(id=>eq(entries.user,id))));
    const all=await db.select().from(entries).where(filter);
-   for(const e of all.sort((a,b)=>a.joined-b.joined))list.push({id:e.id,name:await crypt(e.name,true),status:e.status,joined:e.joined,mine:identities.includes(e.user)});
+   let ownerName:string|null=null;
+   for(const e of all.sort((a,b)=>a.joined-b.joined)){
+     let acceptedBy:string|null=null;
+     if(e.status==='admitted'){
+       if(e.acceptedBy)acceptedBy=await crypt(e.acceptedBy,true);
+       else {
+         if(!ownerName){const owner=await db.select().from(profiles).where(eq(profiles.id,room.owner)).get();ownerName=owner?await crypt(owner.name,true):'Your teacher';}
+         acceptedBy=ownerName;
+       }
+     }
+     list.push({id:e.id,name:await crypt(e.name,true),status:e.status,joined:e.joined,mine:identities.includes(e.user),ticket:await ticketNumber(e),acceptedBy,admittedAt:e.admittedAt||null});
+   }
  }
  return json({signedIn:!!u,profile:p?await crypt(p.name,true):null,owned,room:room?{id:room.id,title:room.title,open:room.open,isTeacher:teacher}:null,list});
  }catch{return json({error:'Unable to load your room. Please try again.'},500)}}
@@ -44,7 +65,9 @@ export async function POST(req:Request){try{
    const id=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(room.id+':'+session.id));
    const entryId=Array.from(new Uint8Array(id),v=>v.toString(16).padStart(2,'0')).join('');
    await db.insert(entries).values({id:entryId,room:room.id,user:session.id,name:await crypt(name),status:'waiting',joined:Date.now()}).onConflictDoNothing();
-   return json({ok:true},200,session.cookie);
+   const entry=await db.select().from(entries).where(eq(entries.id,entryId)).get();
+   if(!entry)throw Error('Entry not found');
+   return json({ok:true,ticket:await ticketNumber(entry)},200,session.cookie);
  }
  if(b.action==='leave'){
    const guest=guestSession(req),identities=[guest,u?.userId].filter((id):id is string=>!!id);
@@ -60,8 +83,8 @@ export async function POST(req:Request){try{
  const room=await db.select().from(rooms).where(eq(rooms.id,String(b.code||'').trim().toUpperCase())).get();if(!room)return json({error:'Room not found. Check your classroom code.'},404);
  if(room.owner!==u.userId)return json({error:'Only this room’s teacher can do that.'},403);
  if(b.action==='toggle')await db.update(rooms).set({open:room.open?0:1}).where(eq(rooms.id,room.id));
- else if(b.action==='admitAll')await db.update(entries).set({status:'admitted'}).where(and(eq(entries.room,room.id),eq(entries.status,'waiting')));
- else if(b.action==='admit')await db.update(entries).set({status:'admitted'}).where(and(eq(entries.room,room.id),eq(entries.id,String(b.id))));
+ else if(b.action==='admitAll')await db.update(entries).set({status:'admitted',acceptedBy:p.name,admittedAt:Date.now()}).where(and(eq(entries.room,room.id),eq(entries.status,'waiting')));
+ else if(b.action==='admit')await db.update(entries).set({status:'admitted',acceptedBy:p.name,admittedAt:Date.now()}).where(and(eq(entries.room,room.id),eq(entries.id,String(b.id)),eq(entries.status,'waiting')));
  else if(b.action==='remove')await db.delete(entries).where(and(eq(entries.room,room.id),eq(entries.id,String(b.id))));
  else return json({error:'Unknown action'},400);return json({ok:true});
  }catch{return json({error:'That did not save. Please try again.'},500)}}

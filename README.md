@@ -13,6 +13,8 @@ Students can join the public hosted app with a display name and classroom code. 
 - Students join with a display name and room code, with no account or login.
 - Teachers create an account profile after ChatGPT sign-in.
 - Teachers create rooms and share unique classroom codes.
+- Every waiting-room entry gets a persistent numeric ticket displayed to the student and teacher.
+- An in-app admission popup says “<teacher display name> has accepted you” and shows the ticket. Dismissal is remembered in the current browser session; no browser notification permission is needed.
 - Students join a waiting room and see their own admission status. A secure HttpOnly browser cookie identifies their guest session for up to 12 hours; refresh keeps their room code in the URL. Clearing cookies or switching browsers starts a new session.
 - Teachers admit individual learners or everyone waiting, remove entries, and close or reopen a room.
 - Display names are encrypted in Cloudflare D1 using AES-256-GCM and a server-only key. Teachers can reveal names only in rooms they own. Students see only their own entries.
@@ -21,6 +23,7 @@ Students can join the public hosted app with a display name and classroom code. 
 ## Source layout
 
 - `app/room.tsx` — student and teacher interface
+- `app/acceptance-notice.tsx` — accessible admission dialog
 - `app/globals.css` — responsive styles and plant illustration
 - `app/api/room/route.ts` — authenticated account, room, queue, and encryption operations
 - `app/chatgpt-auth.ts` — Sites authentication helpers
@@ -44,6 +47,8 @@ Requires Node.js 22.13 or newer.
    ```sh
    node --import ./scripts/sites-env.mjs ./node_modules/wrangler/bin/wrangler.js d1 execute DB --local --config dist/server/wrangler.json --persist-to .wrangler/state --file drizzle/0000_supreme_leper_queen.sql
    ```
+Apply each later migration in order with the same command, replacing the filename (including `drizzle/0001_silent_the_hood.sql`). Do not replay already-applied migrations.
+
 5. Run `npm run dev` and open the printed localhost URL.
 
 Local loopback development provides a simulated sign-in identity. Hosted sign-in is supplied by Sites. The production database and encryption key are not included in this repository.
@@ -51,7 +56,7 @@ Local loopback development provides a simulated sign-in identity. Hosted sign-in
 ## Checks
 
 ```sh
-node --test tests/guest-room.test.mjs
+node --test tests/guest-room.test.mjs tests/ticket-schema.test.mjs
 npx tsc --noEmit
 npm run build
 ```
